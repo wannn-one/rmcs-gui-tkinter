@@ -34,12 +34,12 @@
 1. **Clone or download this project**
 ```bash
 git clone <repository-url>
-cd geolistrik
+cd rmcs-gui-tkinter
 ```
 
 2. **Install dependencies**
 ```bash
-pip install tkinter serial matplotlib pyinstaller
+pip install -r requirements.txt
 ```
 
 3. **Run the application**
@@ -62,9 +62,9 @@ pyinstaller --onefile --windowed --name "RMCS_App" RMCS_App.py
 
 **How to use:**
 
-1. **Ensure PyInstaller is installed**
+1. **Ensure dependencies are installed**
 ```bash
-pip install pyinstaller
+pip install -r requirements.txt
 ```
 
 2. **Run the batch file**
