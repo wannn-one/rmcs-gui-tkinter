@@ -4,6 +4,10 @@ import serial
 import serial.tools.list_ports
 import threading
 import queue
+import csv
+import math
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
 
 STYLE_CONFIG = {
     "font_normal": ("Calibri", 10),
@@ -18,8 +22,7 @@ STYLE_CONFIG = {
 class RMCSApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Resistivity Multielectrode Control System (RMCS) - Final")
-        self.geometry("1100x700")
+        self.geometry("1920x1080")
         self.configure(bg=STYLE_CONFIG["bg_color"])
 
         self.serial_port = None
@@ -32,13 +35,21 @@ class RMCSApp(tk.Tk):
 
         self.measurement_sequence = []
         self.current_step = 0
+        self.base_spacing = 1.0
+        self.plot_data_x = []
+        self.plot_data_y = []
+        
+        # Default project name
+        from datetime import datetime
+        self.project_name = f"RMCS_Project_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         self._create_main_layout()
         self._create_all_widgets()
         self.populate_com_ports()
 
         self.mode_var.trace_add("write", lambda *args: self.toggle_mode())
-        self.config_var.trace_add("write", lambda *args: self.handle_config_change())
+
+        self.title(f"RMCS - {self.project_name} [Wenner]")
 
         self.process_serial_queue()
 
@@ -59,6 +70,9 @@ class RMCSApp(tk.Tk):
         self.right_panel.grid(row=0, column=1, sticky="nsew")
         self.right_panel.grid_rowconfigure(1, weight=1)
         self.right_panel.grid_columnconfigure(0, weight=1)
+        
+        self.notebook = ttk.Notebook(self.right_panel)
+        self.notebook.grid(row=1, column=0, sticky="nsew")
 
     def _create_all_widgets(self):
         self._create_comms_frame()
@@ -66,8 +80,9 @@ class RMCSApp(tk.Tk):
         self._create_timer_frame()
         self._create_electrode_control_frame()
         self._create_progress_frame()
-        self._create_command_setting_frame()
-        self._create_data_table_frame()
+        self._create_data_tab()
+        self._create_plot_tab()
+        self._create_export_tab()
 
     def _create_comms_frame(self):
         frame = ttk.LabelFrame(self.left_panel, text="Communication", padding=10)
@@ -93,16 +108,50 @@ class RMCSApp(tk.Tk):
         frame.pack(fill="x", pady=5)
 
         self.config_var = tk.StringVar(value="Wenner")
-        ttk.Radiobutton(frame, text="Schlumberger", variable=self.config_var, value="Schlumberger").pack(anchor="w")
-        ttk.Radiobutton(frame, text="Wenner", variable=self.config_var, value="Wenner").pack(anchor="w")
-        ttk.Radiobutton(frame, text="Dipole-dipole", variable=self.config_var, value="Dipole-dipole").pack(anchor="w")
+        
+        self.radio_schlum = ttk.Radiobutton(frame, text="Schlumberger", variable=self.config_var, value="Schlumberger", 
+                                          command=lambda: self.set_config("Schlumberger"))
+        self.radio_schlum.pack(anchor="w")
+        
+        self.radio_wenner = ttk.Radiobutton(frame, text="Wenner", variable=self.config_var, value="Wenner",
+                                          command=lambda: self.set_config("Wenner"))
+        self.radio_wenner.pack(anchor="w")
+        
+        self.radio_dipole = ttk.Radiobutton(frame, text="Dipole-dipole", variable=self.config_var, value="Dipole-dipole",
+                                          command=lambda: self.set_config("Dipole-dipole"))
+        self.radio_dipole.pack(anchor="w")
 
         self.start_button = ttk.Button(frame, text="START MEASUREMENT (AUTO)", command=self.start_measurement_sequence, style="Accent.TButton")
         self.start_button.pack(fill="x", pady=10)
 
+    def set_config(self, config_name):
+        print(f"🎯 set_config dipanggil dengan: {config_name}")
+        self.config_var.set(config_name)
+        print(f"🔍 config_var.get() sekarang: {self.config_var.get()}")
+        self.title(f"RMCS - {self.project_name} [{config_name}]")
+        
+    def on_config_change(self):
+        self.after(10, self._update_config_display)
+        
+    def _update_config_display(self):
+        config = self.config_var.get()
+        print(f"📻 Konfigurasi berubah ke: {config}")
+        self.title(f"RMCS - {self.project_name} [{config}]")
+    
     def handle_config_change(self):
         config = self.config_var.get()
-        print(f"⚙️ Konfigurasi pengukuran diubah ke: {config}")
+        print(f"⚙️ handle_config_change() dipanggil - Konfigurasi: {config}")
+        self.title(f"RMCS - {self.project_name} [{config}]")
+
+    def update_project_name(self):
+        new_name = self.project_name_entry.get().strip()
+        if new_name:
+            self.project_name = new_name
+            config = self.config_var.get()
+            self.title(f"RMCS - {self.project_name} [{config}]")
+            print(f"📝 Nama project diubah ke: {self.project_name}")
+        else:
+            messagebox.showwarning("Peringatan", "Nama project tidak boleh kosong.")
 
     def set_mode_otomatis(self):
         self.mode_var.set("Otomatis")
@@ -194,38 +243,66 @@ class RMCSApp(tk.Tk):
         self.reset_button = ttk.Button(frame, text="RESET SYSTEM", command=self.reset_all, style="Red.TButton")
         self.reset_button.pack(fill="x", pady=5)
 
-    def _create_command_setting_frame(self):
-        frame = ttk.LabelFrame(self.right_panel, text="Command Setting", padding=10)
-        frame.grid(row=0, column=0, sticky="ew", pady=5)
-        
-        ttk.Label(frame, text="Cmd File:").grid(row=0, column=0, padx=5, sticky="w")
-        self.file_path_entry = ttk.Entry(frame, width=50)
-        self.file_path_entry.grid(row=0, column=1, padx=5, sticky="ew")
-        
-        ttk.Button(frame, text="Browse...", command=self.browse_file).grid(row=0, column=2, padx=5)
-        ttk.Button(frame, text="Load CMD", command=self.load_cmd_file).grid(row=0, column=3, padx=5)
+    def _create_data_tab(self):
+        data_frame = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(data_frame, text="Data Table")
+        data_frame.grid_rowconfigure(1, weight=1)
+        data_frame.grid_columnconfigure(0, weight=1)
 
-    def _create_data_table_frame(self):
-        frame = ttk.Frame(self.right_panel)
-        frame.grid(row=1, column=0, sticky="nsew", pady=5)
-        frame.grid_rowconfigure(0, weight=1)
-        frame.grid_columnconfigure(0, weight=1)
+        cmd_frame = ttk.LabelFrame(data_frame, text="Project & Command Setting", padding=10)
+        cmd_frame.grid(row=0, column=0, sticky="ew", pady=5)
+        cmd_frame.grid_columnconfigure(1, weight=1)
+        
+        ttk.Label(cmd_frame, text="Project Name:").grid(row=0, column=0, padx=5, sticky="w")
+        self.project_name_entry = ttk.Entry(cmd_frame, width=50)
+        self.project_name_entry.insert(0, self.project_name)
+        self.project_name_entry.grid(row=0, column=1, padx=5, sticky="ew")
+        ttk.Button(cmd_frame, text="Update", command=self.update_project_name).grid(row=0, column=2, padx=5)
+        
+        ttk.Label(cmd_frame, text="Cmd File:").grid(row=1, column=0, padx=5, sticky="w")
+        self.file_path_entry = ttk.Entry(cmd_frame, width=50)
+        self.file_path_entry.grid(row=1, column=1, padx=5, sticky="ew")
+        ttk.Button(cmd_frame, text="Browse...", command=self.browse_file).grid(row=1, column=2, padx=5)
+        ttk.Button(cmd_frame, text="Load CMD", command=self.load_cmd_file).grid(row=1, column=3, padx=5)
 
+        table_frame = ttk.Frame(data_frame)
+        table_frame.grid(row=1, column=0, sticky="nsew", pady=5)
+        table_frame.grid_rowconfigure(0, weight=1)
+        table_frame.grid_columnconfigure(0, weight=1)
         columns = ("no", "a", "b", "m", "n", "curr", "volt", "res", "status")
-        self.tree = ttk.Treeview(frame, columns=columns, show="headings")
-        
+        self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
         col_map = {"no": "No", "a": "A", "b": "B", "m": "M", "n": "N", "curr": "Current (mA)", "volt": "Voltage (mV)", "res": "Resistivity (Ωm)", "status": "Status"}
-        width_map = {"no": 30, "a": 30, "b": 30, "m": 30, "n": 30, "curr": 100, "volt": 100, "res": 120, "status": 100}
-
         for col in columns:
             self.tree.heading(col, text=col_map[col])
-            self.tree.column(col, width=width_map[col], anchor="center")
-
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+            self.tree.column(col, anchor="center", width=80)
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
-        
         self.tree.grid(row=0, column=0, sticky="nsew")
         scrollbar.grid(row=0, column=1, sticky="ns")
+
+    def _create_plot_tab(self):
+        plot_frame = ttk.Frame(self.notebook, padding=10)
+        self.notebook.add(plot_frame, text="Plot Resistivity")
+
+        self.plot_figure = Figure(figsize=(8, 6), dpi=100)
+        self.plot_axes = self.plot_figure.add_subplot(111)
+        self.plot_axes.set_title("Apparent Resistivity Profile")
+        self.plot_axes.set_xlabel("Measurement Point")
+        self.plot_axes.set_ylabel("Apparent Resistivity (Ωm)")
+        self.plot_axes.grid(True)
+
+        self.plot_canvas = FigureCanvasTkAgg(self.plot_figure, master=plot_frame)
+        self.plot_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+        toolbar = NavigationToolbar2Tk(self.plot_canvas, plot_frame)
+        toolbar.update()
+        self.plot_canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+    def _create_export_tab(self):
+        export_frame = ttk.Frame(self.notebook, padding=20)
+        self.notebook.add(export_frame, text="Export")
+        ttk.Button(export_frame, text="Export Data to CSV", command=self.export_to_csv, style="Accent.TButton").pack(pady=10, fill="x")
+        ttk.Button(export_frame, text="Save Plot as Image", command=self.save_plot_image, style="Accent.TButton").pack(pady=10, fill="x")
 
     # ===================================================================
     # BAGIAN 2: LOGIKA APLIKASI DAN FUNGSI
@@ -295,6 +372,7 @@ class RMCSApp(tk.Tk):
         if self.is_running:
             return messagebox.showwarning("Peringatan", "Pengukuran sedang berjalan.")
         
+        self.reset_plot()
         self.is_running = True
         self.current_step = 0
         self.progress_bar['maximum'] = len(self.measurement_sequence)
@@ -323,8 +401,10 @@ class RMCSApp(tk.Tk):
         self.send_command(f"S{a}:ON"); self.send_command(f"S{b}:ON")
         self.send_command(f"S{m}:ON"); self.send_command(f"S{n}:ON")
         
-        self.send_command(f"S{m}:GETDATA")
-        
+        #? PERHATIKAN DI SINI, GANTI S1:GETDATA MENJADI S{m}:GETDATA, S1:GETDATA KARENA HANYA ADA 1 SLAVE YANG DI UKUR
+        # self.send_command(f"S{m}:GETDATA")
+        self.send_command(f"S1:GETDATA")
+
         self.countdown_label.config(foreground="black")
         self.update_countdown(duration)
         self.after(duration * 1000, self.process_step_result)
@@ -368,8 +448,84 @@ class RMCSApp(tk.Tk):
             for i in self.tree.get_children():
                 self.tree.delete(i)
             self.measurement_sequence = []
-        
+        self.reset_plot()
+
         print("SISTEM DIRESET")
+
+    def update_plot(self):
+        self.plot_axes.clear()
+        self.plot_axes.plot(self.plot_data_x, self.plot_data_y, marker='o', linestyle='-')
+        self.plot_axes.set_title("Apparent Resistivity Profile")
+        self.plot_axes.set_xlabel("Measurement Point")
+        self.plot_axes.set_ylabel("Apparent Resistivity (Ωm)")
+        self.plot_axes.grid(True)
+        self.plot_canvas.draw()
+
+    def reset_plot(self):
+        self.plot_data_x.clear()
+        self.plot_data_y.clear()
+        self.plot_axes.clear()
+        self.plot_axes.set_title("Apparent Resistivity Profile")
+        self.plot_axes.set_xlabel("Measurement Point")
+        self.plot_axes.set_ylabel("Apparent Resistivity (Ωm)")
+        self.plot_axes.grid(True)
+        self.plot_canvas.draw()
+
+    def export_to_csv(self):
+        if not self.tree.get_children():
+            return messagebox.showwarning("Peringatan", "Tidak ada data untuk diekspor.")
+        
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_name = f"{self.project_name}_Data_{timestamp}.csv"
+        
+        filepath = filedialog.asksaveasfilename(
+            initialfile=default_name,
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            title="Simpan Data sebagai CSV"
+        )
+        if not filepath:
+            return
+        
+        try:
+            with open(filepath, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f, delimiter=';')
+                headers = [self.tree.heading(col)["text"] for col in self.tree["columns"]]
+                writer.writerow(headers)
+                
+                for row_id in self.tree.get_children():
+                    row_values = self.tree.item(row_id)["values"]
+                    row_values = [str(val) for val in row_values]
+                    writer.writerow(row_values)
+                    
+            messagebox.showinfo("Sukses", f"Data berhasil disimpan ke:\n{filepath}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Gagal menyimpan file:\n{e}")
+
+    def save_plot_image(self):
+        if not self.plot_data_x:
+            return messagebox.showwarning("Peringatan", "Tidak ada plot untuk disimpan.")
+        
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        config_type = self.config_var.get()
+        default_name = f"{self.project_name}_Plot_{config_type}_{timestamp}.png"
+        
+        filepath = filedialog.asksaveasfilename(
+            initialfile=default_name,
+            defaultextension=".png",
+            filetypes=[("PNG Image", "*.png"), ("JPEG Image", "*.jpg"), ("All files", "*.*")],
+            title="Simpan Gambar Plot"
+        )
+        if not filepath:
+            return
+        
+        try:
+            self.plot_figure.savefig(filepath, dpi=300)
+            messagebox.showinfo("Sukses", f"Plot berhasil disimpan ke:\n{filepath}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Gagal menyimpan gambar:\n{e}")
 
     # ===================================================================
     # BAGIAN 3: FUNGSI UTILITAS DAN KOMUNIKASI SERIAL
@@ -425,7 +581,7 @@ class RMCSApp(tk.Tk):
             except (serial.SerialException, TypeError):
                 break
 
-    def process_serial_queue(self): 
+    def process_serial_queue(self):
         try:
             while not self.data_queue.empty():
                 line = self.data_queue.get_nowait()
@@ -435,26 +591,43 @@ class RMCSApp(tk.Tk):
                     try:
                         data_part = line.split(":")[1]
                         values = data_part.split(',')
-                        
                         if len(values) == 3:
-                            slave_id = int(values[0])
-                            real_curr = float(values[1])
-                            real_volt = float(values[2])
-                            
+                            slave_id, real_curr, real_volt = map(float, values)
                             resistance = real_volt / real_curr if real_curr != 0 else 0
-                            
                             step_data = self.measurement_sequence[self.current_step]
                             a, b, m, n = step_data['A'], step_data['B'], step_data['M'], step_data['N']
+                            config_type = self.config_var.get()
+                            print(f"🔍 DEBUG: config_type saat pemrosesan data = '{config_type}'")
+                            K = 0.0
+                            if config_type == "Wenner":
+                                print("Wenner")
+                                spacing = abs(m - a) * self.base_spacing
+                                K = 2 * math.pi * spacing
+                            elif config_type == "Schlumberger":
+                                print("Schlumberger")
+                                ab_dist = abs(b - a) * self.base_spacing
+                                mn_dist = abs(n - m) * self.base_spacing
+                                if mn_dist > 0: K = math.pi * ( ((ab_dist/2)**2 - (mn_dist/2)**2) / mn_dist )
+                            elif config_type == "Dipole-dipole":
+                                print("Dipole-dipole")
+                                a_spacing = abs(b - a) * self.base_spacing
+                                dipole_center_dist = abs(((m+n)/2) - ((a+b)/2)) * self.base_spacing
+                                if a_spacing > 0:
+                                    n_factor = dipole_center_dist / a_spacing
+                                    K = math.pi * n_factor * (n_factor + 1) * (n_factor + 2) * a_spacing
+                            resistivity = K * resistance
                             
-                            self.tree.item(self.current_step, values=(
-                                self.current_step + 1, a, b, m, n, 
-                                f"{real_curr:.2f}", f"{real_volt:.2f}", f"{resistance:.2f}", "Done"
-                            ))
-                        else:
-                            print(f"Format data tidak valid: {line}")
+                            curr_str = f"{real_curr:.2f}".replace('.', ',')
+                            volt_str = f"{real_volt:.2f}".replace('.', ',')
+                            res_str = f"{resistivity:.2f}".replace('.', ',')
+
+                            self.tree.item(self.current_step, values=(self.current_step + 1, a, b, m, n, curr_str, volt_str, res_str, "Done"))
+                            
+                            self.plot_data_x.append(self.current_step + 1)
+                            self.plot_data_y.append(resistivity)
+                            self.update_plot()
                     except (ValueError, IndexError) as e:
                         print(f"Error mem-parsing data: {e} - Data: {line}")
-
         finally:
             self.after(100, self.process_serial_queue)
 
@@ -475,24 +648,37 @@ class RMCSApp(tk.Tk):
 
         new_sequence = []
         try:
-            with open(filepath, 'r') as f:
-                for line_num, line in enumerate(f, 1):
-                    if not line.strip() or line.strip().startswith('#'):
-                        continue
-                    
-                    parts = []
-                    if ',' in line:
-                        parts = line.strip().split(',')
-                    elif ' ' in line:
-                        parts = line.strip().split()
-                    else:
-                        parts = line.strip().split('\t')
+            encodings = ['utf-8', 'latin-1', 'cp1252']
+            file_content = None
+            
+            for encoding in encodings:
+                try:
+                    with open(filepath, 'r', encoding=encoding) as f:
+                        file_content = f.read()
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if file_content is None:
+                raise ValueError("Tidak dapat membaca file dengan encoding yang didukung")
+            
+            for line_num, line in enumerate(file_content.splitlines(), 1):
+                if not line.strip() or line.strip().startswith('#'):
+                    continue
+                
+                parts = []
+                if ',' in line:
+                    parts = line.strip().split(',')
+                elif ' ' in line:
+                    parts = line.strip().split()
+                else:
+                    parts = line.strip().split('\t')
 
-                    if len(parts) == 4:
-                        a, b, m, n = map(int, parts)
-                        new_sequence.append({'A': a, 'B': b, 'M': m, 'N': n})
-                    else:
-                        raise ValueError(f"Setiap baris harus berisi 4 angka. Error di baris {line_num}.")
+                if len(parts) == 4:
+                    a, b, m, n = map(int, parts)
+                    new_sequence.append({'A': a, 'B': b, 'M': m, 'N': n})
+                else:
+                    raise ValueError(f"Setiap baris harus berisi 4 angka. Error di baris {line_num}.")
             
             self.measurement_sequence = new_sequence
             

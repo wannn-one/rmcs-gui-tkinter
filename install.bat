@@ -1,0 +1,1 @@
+pyinstaller --onefile --windowed --name "RMCS_App" RMCS_App.py
