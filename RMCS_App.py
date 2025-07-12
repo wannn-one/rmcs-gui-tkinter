@@ -581,10 +581,10 @@ class RMCSApp(tk.Tk):
             self.is_connected = True
             self.serial_thread = threading.Thread(target=self.read_serial_data, daemon=True)
             self.serial_thread.start()
-            print(f"🔌  Connected to {port} at {self.baud_rate_combo.get()} baud", flush=True)
+            print(f"🔌  Connected to {port} at {self.baud_rate_combo.get()} baud")
         except serial.SerialException as e:
             messagebox.showerror("Connection Error", f"Failed to connect: {e}")
-            print(f"❌  Connection failed - {e}", flush=True)
+            print(f"❌  Connection failed - {e}")
 
     def disconnect(self):
         self.is_running = False
@@ -594,17 +594,17 @@ class RMCSApp(tk.Tk):
         self.is_connected = False
         self.status_label.config(text="Not ready", foreground="red")
         self.connect_button.config(text="Connect")
-        print("🔌  Disconnected from serial port", flush=True)
+        print("🔌  Disconnected from serial port")
         
     def send_command(self, command):
         if self.is_connected and self.serial_port:
             try:
                 self.serial_port.write((command + '\n').encode('utf-8'))
-                print(f"➡️  Command sent to Master: {command}", flush=True)
+                print(f"➡️  Command sent to Master: {command}")
             except serial.SerialException:
                 self.disconnect()
         else:
-            print("❌  Cannot send command - not connected", flush=True)
+            print("❌  Cannot send command - not connected")
 
     def read_serial_data(self):
         while self.is_connected and self.serial_port:
@@ -619,7 +619,7 @@ class RMCSApp(tk.Tk):
         try:
             while not self.data_queue.empty():
                 line = self.data_queue.get_nowait()
-                print(f"⬅️  Data received from Master: {line}", flush=True)
+                print(f"⬅️  Data received from Master: {line}")
                 
                 if line.startswith("DATA:"):
                     try:
@@ -757,27 +757,26 @@ class RMCSApp(tk.Tk):
 
     def on_closing(self):
         if messagebox.askokcancel("Exit", "Are you sure you want to exit?"):
-            print("🚪  Application closing", flush=True)
+            print("🚪  Application closing")
             self.disconnect()
             self.destroy()
 
 if __name__ == "__main__":
     import sys
     
-    # Force flush stdout to prevent waiting for input
-    sys.stdout.flush()
+    # Remove problematic sys.stdout.flush() call
     
     style = ttk.Style()
     style.theme_use('clam')
     style.configure("Red.TButton", foreground="white", background=STYLE_CONFIG["red_button"])
     style.configure("Accent.TButton", foreground="white", background=STYLE_CONFIG["green_button"])
     
-    print("🚀  RMCS Application starting...", flush=True)
+    print("🚀  RMCS Application starting...")
     
     app = RMCSApp()
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
     
-    print("🚀  RMCS Application started successfully!", flush=True)
+    print("🚀  RMCS Application started successfully!")
     
     # Ensure the app window is brought to front
     app.lift()
