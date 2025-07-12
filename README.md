@@ -233,7 +233,29 @@ This project is developed for geophysical research purposes.
 
 ## 🔄 Version History
 
+- **v1.0.1** (January 2025): Language localization update
+  - Converted all Indonesian user interface text to English
+  - Standardized error messages and dialog boxes
+  - Improved international accessibility
 - **v1.0.0** (January 2025): Initial release with full features
+
+## 🌐 Recent Updates
+
+### Language Translation (v1.0.1)
+This version includes a complete language translation update:
+- **User Interface**: All messagebox titles and content converted from Indonesian to English
+- **Error Messages**: Standardized error reporting in English
+- **File Dialogs**: Updated dialog titles for better international support
+- **Debug Output**: All debug print statements already in English (no changes needed)
+
+The translation covers:
+- Warning/Error dialogs (e.g., "Peringatan" → "Warning")
+- Success messages (e.g., "Sukses" → "Success") 
+- Connection status messages
+- File operation feedback
+- Measurement status updates
+
+This makes the application more accessible to international users while maintaining all original functionality.
 
 ---
 
